@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zehirli Gaz Simülasyonu – 3 Katlı Ofis</title>
+<style>
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: row;
+    height: 100vh;
+    margin: 0;
+  }
+  /* Sol panel */
+  .left-panel {
+    width: 360px;
+    background: #161b22;
+    padding: 20px;
+    border-right: 2px solid #00ff9d55;
+    overflow-y: auto;
+  }
+  h1 { color: #00ff9d; margin-bottom: 10px; text-align: center; }
+  .info { color: #9ca3af; font-size: 0.85rem; margin-bottom: 25px; text-align: center; }
+
+  select, button {
+    background: #0d1117;
+    color: #00ff9d;
+    border: 1px solid #00ff9d;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  button:hover, select:hover {
+    background: #00ff9d;
+    color: #0d1117;
+  }
+  .reset {
+    background: #ff5555;
+    border-color: #ff5555;
+    color: white;
+  }
+
+  .gas {
+    background: #0d1117;
+    border-radius: 10px;
+    padding: 10px;
+    box-shadow: 0 0 8px #00ff9d33;
+    margin-bottom: 15px;
+  }
+  .bar {
+    height: 18px;
+    background: linear-gradient(to right, #00ff9d, #ff0000);
+    border-radius: 5px;
+    transition: width 1s ease-out;
+  }
+  .warning { color: #ff5555; font-weight: bold; margin-top: 5px; }
+  .status { font-weight: bold; margin-top: 5px; }
+
+  /* Sağ taraf – bina krokisi */
+  .building {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .floor {
+    display: flex;
+    gap: 10px;
+  }
+  .room {
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    background: #1f2937;
+    color: #e6edf3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    transition: 0.3s;
+    font-weight: bold;
+  }
+  .room:hover {
+    box-shadow: 0 0 10px #00ff9d;
+  }
+  .indicator {
+    position: absolute;
+    top: 5px;
+    right: 8px;
+    font-size: 18px;
+  }
+  .safe { color: #00ff9d; }
+  .warn { color: #ffcc00; }
+  .danger { color: #ff4444; }
+</style>
+</head>
+<body>
+
+<!-- SOL PANEL -->
+<div class="left-panel">
+  <h1>☣️ Zehirli Gaz Simülasyonu</h1>
+  <p class="info">Her odadaki ppm değeri IDLH (ölümcül) eşiklere göre simüle edilir.</p>
+
+  <select id="selectedRoom">
+    <option disabled selected>Oda Seç</option>
+  </select>
+  <select id="gasSelect">
+    <option disabled selected>Gaz Seç ve Ekle</option>
+  </select>
+  <button onclick="addSelectedGas()">Gazı Ekle</button>
+  <button class="reset" onclick="resetAll()">Gazları Temizle</button>
+
+  <div id="gasContainer"></div>
+</div>
+
+<!-- SAĞ TARAF – 3 Katlı Bina -->
+<div class="building" id="building"></div>
+
+<script>
+// 🔹 Gerçek IDLH (ölümcül) ppm değerleri (NIOSH)
+const gasesData = [
+  { name: "Karbon Monoksit (CO)", idlh: 1200, effect: ["Baş ağrısı", "Bilinç kaybı", "Ölümcül"] },
+  { name: "Azot Dioksit (NO₂)", idlh: 20, effect: ["Solunum zorluğu", "Akciğer hasarı", "Organ yetmezliği"] },
+  { name: "Kükürt Dioksit (SO₂)", idlh: 100, effect: ["Boğaz yanması", "Nefes darlığı", "Solunum yetmezliği"] },
+  { name: "VOC (Benzen)", idlh: 500, effect: ["Baş dönmesi", "Yorgunluk", "Sinir sistemi hasarı"] },
+  { name: "Metan (CH₄)", idlh: 40000, effect: ["Patlama riski", "Boğulma", "Bilinci kaybı"] },
+  { name: "Hidrojen Sülfür (H₂S)", idlh: 100, effect: ["Koku eşiği kaybı", "Solunum felci", "Ölümcül"] },
+  { name: "Amonyak (NH₃)", idlh: 300, effect: ["Göz yanması", "Akciğer tahrişi", "Zehirlenme"] }
+];
+
+const building = document.getElementById("building");
+const roomSelect = document.getElementById("selectedRoom");
+const gasSelect = document.getElementById("gasSelect");
+const container = document.getElementById("gasContainer");
+
+let rooms = {};
+let selectedRoom = null;
+
+// ▪️ 3 Kat – 6 Oda oluştur
+for (let f = 3; f >= 1; f--) {
+  const floor = document.createElement("div");
+  floor.className = "floor";
+  floor.innerHTML = "";
+  for (let r = 1; r <= 6; r++) {
+    const id = `F${f}R${r}`;
+    const div = document.createElement("div");
+    div.className = "room";
+    div.id = id;
+    div.innerHTML = `${f}-${r}<span class='indicator safe'>⚫</span>`;
+    div.onclick = () => selectRoom(id);
+    floor.appendChild(div);
+    rooms[id] = [];
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = `${f}. Kat - Oda ${r}`;
+    roomSelect.appendChild(opt);
+  }
+  building.appendChild(floor);
+}
+
+// ▪️ Menüye gazları ekle
+gasesData.forEach((g, i) => {
+  const opt = document.createElement("option");
+  opt.value = i;
+  opt.textContent = g.name;
+  gasSelect.appendChild(opt);
+});
+
+function selectRoom(id) {
+  selectedRoom = id;
+  document.querySelectorAll(".room").forEach(r => r.style.outline = "none");
+  document.getElementById(id).style.outline = "2px solid #00ff9d";
+  updateSimulation();
+}
+
+function addSelectedGas() {
+  const gasIndex = gasSelect.value;
+  if (!selectedRoom || gasIndex === "") {
+    alert("Lütfen bir oda ve gaz seçin!");
+    return;
+  }
+  const gasInfo = gasesData[gasIndex];
+  const list = rooms[selectedRoom];
+  if (list.find(g => g.name === gasInfo.name)) {
+    alert("Bu gaz bu odada zaten mevcut!");
+    return;
+  }
+  list.push({ ...gasInfo, ppm: 0 });
+  updateSimulation();
+}
+
+function addGas(roomId, i) {
+  const g = rooms[roomId][i];
+  g.ppm = Math.min(g.idlh * 1.5, g.ppm + g.idlh * 0.1 + Math.random() * g.idlh * 0.05);
+  updateSimulation();
+}
+
+function removeGas(roomId, i) {
+  rooms[roomId].splice(i, 1);
+  updateSimulation();
+}
+
+function resetAll() {
+  for (const r in rooms) rooms[r] = [];
+  updateSimulation();
+}
+
+function getEffect(ppm, gas) {
+  if (ppm < gas.idlh * 0.5) return gas.effect[0];
+  if (ppm < gas.idlh * 1.0) return gas.effect[1];
+  return gas.effect[2];
+}
+
+function updateRoomIndicator(roomId) {
+  const total = rooms[roomId].reduce((a, g) => a + g.ppm / g.idlh, 0);
+  const avg = total / (rooms[roomId].length || 1);
+  const icon = document.querySelector(`#${roomId} .indicator`);
+  if (avg >= 1) icon.className = "indicator danger", icon.textContent = "❗";
+  else if (avg >= 0.5) icon.className = "indicator warn", icon.textContent = "⚠️";
+  else icon.className = "indicator safe", icon.textContent = "⚫";
+}
+
+function updateSimulation() {
+  container.innerHTML = "";
+  if (selectedRoom) {
+    const gases = rooms[selectedRoom];
+    gases.forEach((gas, i) => {
+      gas.ppm = Math.max(0, gas.ppm - gas.idlh * 0.01 * Math.random());
+      const barPercent = Math.min(100, (gas.ppm / gas.idlh) * 100);
+      const effect = getEffect(gas.ppm, gas);
+
+      const div = document.createElement("div");
+      div.className = "gas";
+      div.innerHTML = `
+        <h3>${gas.name}</h3>
+        <div class="bar" style="width:${barPercent}%;"></div>
+        <p>Konsantrasyon: ${gas.ppm.toFixed(1)} ppm</p>
+        <p class="status">Etki: ${effect}</p>
+        ${gas.ppm >= gas.idlh ? "<p class='warning'>⚠️ Ölümcül Seviye!</p>" : ""}
+        <button onclick="addGas('${selectedRoom}', ${i})">Gaz Sal (+)</button>
+        <button onclick="removeGas('${selectedRoom}', ${i})">❌ Kaldır</button>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  // Oda renk güncelleme
+  Object.keys(rooms).forEach(updateRoomIndicator);
+}
+
+setInterval(updateSimulation, 1500);
+updateSimulation();
+</script>
+</body>
+</html>
+
+
+
